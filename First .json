@@ -10,3 +10,1224 @@
     "express": "^5.1.0"
   }
 }
+const express = require("express");
+const crypto = require("crypto");
+const path = require("path");
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// Set this on your hosting provider as an environment variable.
+// Example:
+// ADMIN_KEY=L246B5738OP658C
+const ADMIN_KEY = process.env.ADMIN_KEY;
+
+app.use(express.json());
+app.use(express.static(path.join(__dirname, "public")));
+
+const products = [
+  { id: 1, name: "50K COINS", price: 500 },
+  { id: 2, name: "50M MONEY", price: 500 },
+  { id: 3, name: "500K COINS", price: 1000 },
+  { id: 4, name: "50K COINS & 50M", price: 1000 },
+  { id: 5, name: "500K COINS & 50M", price: 1500 },
+  { id: 6, name: "SMOKE COLOUR", price: 1000 },
+  { id: 7, name: "PREMIUM CAR", price: 2000 },
+  { id: 8, name: "KING RANK 👑", price: 1000 },
+  { id: 9, name: "W16 ENGINE (permanent)", price: 1000 },
+  { id: 10, name: "NEW CARS", price: 1000 }
+];
+
+// Development storage.
+// Replace with Firestore/PostgreSQL before production.
+const orders = new Map();
+
+function orderId() {
+  return "YL-" + crypto.randomBytes(5).toString("hex").toUpperCase();
+}
+
+function requireAdmin(req, res, next) {
+  const suppliedKey = req.headers["x-admin-key"];
+
+  if (!ADMIN_KEY || suppliedKey !== ADMIN_KEY) {
+    return res.status(401).json({
+      error: "ACCESS DENIED"
+    });
+  }
+
+  next();
+}
+
+app.get("/api/products", (req, res) => {
+  res.json(products);
+});
+
+app.post("/api/orders", (req, res) => {
+  const { productId, customerName, transactionId } = req.body;
+
+  const product = products.find(
+    item => item.id === Number(productId)
+  );
+
+  if (!product) {
+    return res.status(400).json({
+      error: "Invalid product."
+    });
+  }
+
+  if (!customerName || !transactionId) {
+    return res.status(400).json({
+      error: "Customer name and transaction ID are required."
+    });
+  }
+
+  const id = orderId();
+
+  const order = {
+    id,
+    product: product.name,
+    productId: product.id,
+    amount: product.price,
+    customerName: String(customerName).trim(),
+    transactionId: String(transactionId).trim(),
+    paymentStatus: "PENDING REQUEST",
+    injectionStatus: null,
+    createdAt: new Date().toISOString()
+  };
+
+  orders.set(id, order);
+
+  res.status(201).json({
+    id,
+    status: "PENDING REQUEST"
+  });
+});
+
+// Customer checks order status
+app.get("/api/orders/:id", (req, res) => {
+  const order = orders.get(req.params.id);
+
+  if (!order) {
+    return res.status(404).json({
+      error: "Order not found."
+    });
+  }
+
+  res.json({
+    id: order.id,
+    product: order.product,
+    amount: order.amount,
+    paymentStatus: order.paymentStatus,
+    injectionStatus: order.injectionStatus
+  });
+});
+
+// Admin orders
+app.get("/api/admin/orders", requireAdmin, (req, res) => {
+  res.json([...orders.values()]);
+});
+
+// Admin payment decision
+app.post(
+  "/api/admin/orders/:id/payment",
+  requireAdmin,
+  (req, res) => {
+    const order = orders.get(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({
+        error: "Order not found."
+      });
+    }
+
+    const { status } = req.body;
+
+    if (!["APPROVED", "DECLINED"].includes(status)) {
+      return res.status(400).json({
+        error: "Invalid status."
+      });
+    }
+
+    order.paymentStatus = status;
+
+    res.json(order);
+  }
+);
+
+// Admin injection status
+app.post(
+  "/api/admin/orders/:id/injection",
+  requireAdmin,
+  (req, res) => {
+    const order = orders.get(req.params.id);
+
+    if (!order) {
+      return res.status(404).json({
+        error: "Order not found."
+      });
+    }
+
+    if (order.paymentStatus !== "APPROVED") {
+      return res.status(400).json({
+        error: "Payment must be approved first."
+      });
+    }
+
+    const { status } = req.body;
+
+    if (!["INJECTING", "INJECTED"].includes(status)) {
+      return res.status(400).json({
+        error: "Invalid status."
+      });
+    }
+
+    order.injectionStatus = status;
+
+    res.json(order);
+  }
+);
+
+app.get("*", (req, res) => {
+  res.sendFile(path.join(__dirname, "public", "index.html"));
+});
+
+app.listen(PORT, () => {
+  console.log(`YUNG AND LORDS STORE running on port ${PORT}`);
+});
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <title>YUNG AND LORDS STORE</title>
+
+  <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<header>
+  <div class="logo">YUNG AND LORDS STORE</div>
+
+  <button class="menu-btn" onclick="openMenu()">
+    ☰
+  </button>
+</header>
+
+<main>
+
+  <section class="hero">
+    <h1>YUNG AND LORDS STORE</h1>
+    <p>CPM INJECTORS</p>
+  </section>
+
+  <section class="products-section">
+
+    <h2>INJECTIONS</h2>
+
+    <div id="products" class="products"></div>
+
+  </section>
+
+  <section id="paymentSection" class="panel hidden">
+
+    <button class="back-btn" onclick="closePayment()">
+      ← BACK
+    </button>
+
+    <h2>BANK TRANSFER</h2>
+
+    <div class="selected-product">
+      <p>PRODUCT</p>
+      <strong id="selectedProduct"></strong>
+
+      <p>AMOUNT</p>
+      <strong id="selectedAmount"></strong>
+    </div>
+
+    <div class="bank-details">
+
+      <h3>PAYMENT DETAILS</h3>
+
+      <p>
+        <span>ACCOUNT NAME</span>
+        ALAEMEKA IFECHUKWU DAVID
+      </p>
+
+      <p>
+        <span>BANK</span>
+        MONIIEPOINT
+      </p>
+
+      <p>
+        <span>ACCOUNT NUMBER</span>
+        7068046997
+      </p>
+
+    </div>
+
+    <button class="primary-btn" onclick="showPaymentForm()">
+      I HAVE MADE PAYMENT
+    </button>
+
+  </section>
+
+  <section id="paymentForm" class="panel hidden">
+
+    <h2>PAYMENT CONFIRMATION</h2>
+
+    <input
+      id="customerName"
+      type="text"
+      placeholder="Your Name"
+    >
+
+    <input
+      id="transactionId"
+      type="text"
+      placeholder="Transaction ID / Payment Reference"
+    >
+
+    <button class="primary-btn" onclick="submitPayment()">
+      SUBMIT
+    </button>
+
+    <p id="formMessage"></p>
+
+  </section>
+
+  <section id="orderSection" class="panel hidden">
+
+    <h2>YOUR ORDER</h2>
+
+    <div id="orderStatus"></div>
+
+    <p class="order-number">
+      Order ID:
+      <strong id="orderId"></strong>
+    </p>
+
+  </section>
+
+</main>
+
+<!-- MENU -->
+
+<div id="menuOverlay" class="overlay" onclick="closeMenu()"></div>
+
+<aside id="sideMenu">
+
+  <button class="close-btn" onclick="closeMenu()">
+    ✕
+  </button>
+
+  <h2>MENU</h2>
+
+  <button onclick="showAdminLogin()">
+    ADMIN
+  </button>
+
+  <a
+    href="https://whatsapp.com/channel/0029Vb92qWY3bbUvzepOFW3J"
+    target="_blank"
+  >
+    WHATSAPP CHANNEL
+  </a>
+
+  <button>
+    TELEGRAM
+  </button>
+
+</aside>
+
+<!-- ADMIN -->
+
+<section id="adminLogin" class="admin-panel hidden">
+
+  <button class="back-btn" onclick="closeAdmin()">
+    ← BACK
+  </button>
+
+  <h2>ADMIN ACCESS</h2>
+
+  <input
+    id="adminKey"
+    type="password"
+    placeholder="Enter admin access key"
+  >
+
+  <button class="primary-btn" onclick="adminLogin()">
+    ENTER
+  </button>
+
+  <p id="adminMessage"></p>
+
+</section>
+
+<section id="adminDashboard" class="admin-panel hidden">
+
+  <button class="back-btn" onclick="closeAdmin()">
+    ← CLOSE
+  </button>
+
+  <h2>ADMIN DASHBOARD</h2>
+
+  <button
+    class="refresh-btn"
+    onclick="loadOrders()"
+  >
+    REFRESH ORDERS
+  </button>
+
+  <div id="adminOrders"></div>
+
+</section>
+
+<script src="app.js"></script>
+
+</body>
+</html>
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: #080808;
+  color: white;
+  font-family: Arial, sans-serif;
+  min-height: 100vh;
+}
+
+header {
+  height: 65px;
+  background: #111;
+  border-bottom: 1px solid #292929;
+
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+
+  padding: 0 18px;
+
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.logo {
+  font-size: 18px;
+  font-weight: 800;
+}
+
+.menu-btn {
+  background: none;
+  color: white;
+  border: 0;
+  font-size: 27px;
+  cursor: pointer;
+}
+
+.hero {
+  text-align: center;
+  padding: 45px 15px 25px;
+}
+
+.hero h1 {
+  font-size: 28px;
+}
+
+.hero p {
+  margin-top: 10px;
+  color: #aaa;
+}
+
+.products-section {
+  max-width: 1100px;
+  margin: auto;
+  padding: 15px;
+}
+
+.products-section h2 {
+  margin-bottom: 15px;
+}
+
+.products {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.product {
+  background: #151515;
+  border: 1px solid #292929;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.product h3 {
+  min-height: 45px;
+  font-size: 15px;
+}
+
+.price {
+  font-size: 18px;
+  font-weight: bold;
+  margin: 12px 0;
+}
+
+.buy-btn,
+.primary-btn {
+  width: 100%;
+  border: 0;
+  border-radius: 8px;
+  padding: 13px;
+  background: #00c853;
+  color: white;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+.panel {
+  max-width: 600px;
+  margin: 20px auto;
+  padding: 20px;
+  background: #141414;
+  border: 1px solid #292929;
+  border-radius: 14px;
+}
+
+.panel h2 {
+  margin-bottom: 20px;
+}
+
+.selected-product,
+.bank-details {
+  background: #0d0d0d;
+  border-radius: 10px;
+  padding: 16px;
+  margin-bottom: 15px;
+}
+
+.selected-product p,
+.bank-details span {
+  display: block;
+  color: #888;
+  font-size: 12px;
+  margin-bottom: 5px;
+}
+
+.selected-product strong {
+  display: block;
+  margin-bottom: 15px;
+}
+
+.bank-details p {
+  margin-top: 15px;
+}
+
+.panel input,
+.admin-panel input {
+  width: 100%;
+  padding: 14px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  border: 1px solid #333;
+  background: #0c0c0c;
+  color: white;
+  outline: none;
+}
+
+.back-btn,
+.refresh-btn {
+  border: 0;
+  padding: 10px 14px;
+  border-radius: 7px;
+  background: #252525;
+  color: white;
+  cursor: pointer;
+  margin-bottom: 20px;
+}
+
+.hidden {
+  display: none !important;
+}
+
+.order-number {
+  margin-top: 15px;
+  color: #aaa;
+}
+
+.status {
+  padding: 16px;
+  border-radius: 10px;
+  background: #202020;
+  font-weight: bold;
+  text-align: center;
+}
+
+.status.approved {
+  background: #075d2d;
+}
+
+.status.declined {
+  background: #6d1111;
+}
+
+.status.injecting {
+  background: #164e70;
+}
+
+.status.injected {
+  background: #087c3b;
+}
+
+/* SIDE MENU */
+
+.overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.7);
+  z-index: 30;
+}
+
+#sideMenu {
+  position: fixed;
+  right: -300px;
+  top: 0;
+  width: 280px;
+  height: 100%;
+  background: #151515;
+  padding: 25px;
+  z-index: 40;
+  transition: .25s;
+}
+
+#sideMenu.active {
+  right: 0;
+}
+
+#sideMenu.active + .overlay {
+  display: block;
+}
+
+.close-btn {
+  float: right;
+  background: none;
+  border: 0;
+  color: white;
+  font-size: 25px;
+  cursor: pointer;
+}
+
+#sideMenu h2 {
+  margin: 55px 0 20px;
+}
+
+#sideMenu button,
+#sideMenu a {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  margin-top: 12px;
+
+  background: #222;
+  color: white;
+  border: 0;
+  border-radius: 8px;
+
+  text-decoration: none;
+  text-align: center;
+  cursor: pointer;
+}
+
+/* ADMIN */
+
+.admin-panel {
+  max-width: 800px;
+  margin: 30px auto;
+  padding: 20px;
+}
+
+.admin-order {
+  background: #151515;
+  border: 1px solid #292929;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 15px;
+}
+
+.admin-order h3 {
+  margin-bottom: 10px;
+}
+
+.admin-order p {
+  margin: 7px 0;
+  color: #ccc;
+}
+
+.admin-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 15px;
+}
+
+.approve {
+  background: #00a844;
+  color: white;
+}
+
+.decline {
+  background: #a40000;
+  color: white;
+}
+
+.injecting {
+  background: #176a98;
+  color: white;
+}
+
+.injected {
+  background: #00843d;
+  color: white;
+}
+
+.admin-actions button {
+  border: 0;
+  padding: 12px;
+  border-radius: 7px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+@media (min-width: 700px) {
+  .products {
+    grid-template-columns: repeat(4, 1fr);
+  }
+}
+let products = [];
+let selectedProduct = null;
+let currentOrderId = null;
+let adminKey = null;
+let statusTimer = null;
+
+const money = amount =>
+  "₦" + Number(amount).toLocaleString();
+
+async function loadProducts() {
+
+  const response =
+    await fetch("/api/products");
+
+  products = await response.json();
+
+  displayProducts();
+}
+
+function displayProducts() {
+
+  const container =
+    document.getElementById("products");
+
+  container.innerHTML = "";
+
+  products.forEach(product => {
+
+    container.innerHTML += `
+      <article class="product">
+
+        <h3>
+          ${product.id}/ ${product.name}
+        </h3>
+
+        <div class="price">
+          ${money(product.price)}
+        </div>
+
+        <button
+          class="buy-btn"
+          onclick="buyProduct(${product.id})">
+          BUY
+        </button>
+
+      </article>
+    `;
+  });
+}
+
+function buyProduct(id) {
+
+  selectedProduct =
+    products.find(product => product.id === id);
+
+  document.getElementById("selectedProduct")
+    .textContent = selectedProduct.name;
+
+  document.getElementById("selectedAmount")
+    .textContent = money(selectedProduct.price);
+
+  document
+    .getElementById("paymentSection")
+    .classList.remove("hidden");
+
+  window.scrollTo({
+    top: document.getElementById("paymentSection").offsetTop,
+    behavior: "smooth"
+  });
+}
+
+function closePayment() {
+
+  document
+    .getElementById("paymentSection")
+    .classList.add("hidden");
+
+  document
+    .getElementById("paymentForm")
+    .classList.add("hidden");
+}
+
+function showPaymentForm() {
+
+  document
+    .getElementById("paymentForm")
+    .classList.remove("hidden");
+
+  document.getElementById("paymentForm")
+    .scrollIntoView({
+      behavior: "smooth"
+    });
+}
+
+async function submitPayment() {
+
+  const customerName =
+    document.getElementById("customerName")
+      .value.trim();
+
+  const transactionId =
+    document.getElementById("transactionId")
+      .value.trim();
+
+  const message =
+    document.getElementById("formMessage");
+
+  if (!customerName || !transactionId) {
+
+    message.textContent =
+      "Please enter your name and transaction ID.";
+
+    return;
+  }
+
+  message.textContent = "Submitting...";
+
+  const response = await fetch("/api/orders", {
+
+    method: "POST",
+
+    headers: {
+      "Content-Type": "application/json"
+    },
+
+    body: JSON.stringify({
+      productId: selectedProduct.id,
+      customerName,
+      transactionId
+    })
+
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+
+    message.textContent =
+      data.error || "Something went wrong.";
+
+    return;
+  }
+
+  currentOrderId = data.id;
+
+  document.getElementById("orderId")
+    .textContent = currentOrderId;
+
+  document
+    .getElementById("orderSection")
+    .classList.remove("hidden");
+
+  document.getElementById("orderStatus")
+    .innerHTML =
+      `<div class="status">
+        🟡 PENDING REQUEST
+      </div>`;
+
+  message.textContent = "";
+
+  startStatusChecking();
+
+  document.getElementById("orderSection")
+    .scrollIntoView({
+      behavior: "smooth"
+    });
+}
+
+function startStatusChecking() {
+
+  if (statusTimer) {
+    clearInterval(statusTimer);
+  }
+
+  statusTimer =
+    setInterval(checkOrder, 5000);
+}
+
+async function checkOrder() {
+
+  if (!currentOrderId) return;
+
+  const response =
+    await fetch(
+      `/api/orders/${currentOrderId}`
+    );
+
+  if (!response.ok) return;
+
+  const order =
+    await response.json();
+
+  let html = "";
+
+  if (order.paymentStatus === "PENDING REQUEST") {
+
+    html = `
+      <div class="status">
+        🟡 PENDING REQUEST
+      </div>
+    `;
+
+  } else if (order.paymentStatus === "APPROVED") {
+
+    html = `
+      <div class="status approved">
+        ✅ APPROVED
+      </div>
+    `;
+
+    if (order.injectionStatus === "INJECTING") {
+
+      html += `
+        <div class="status injecting">
+          🔵 INJECTING
+        </div>
+      `;
+
+    } else if (order.injectionStatus === "INJECTED") {
+
+      html += `
+        <div class="status injected">
+          🟢 INJECTED
+        </div>
+      `;
+
+    }
+
+  } else if (order.paymentStatus === "DECLINED") {
+
+    html = `
+      <div class="status declined">
+        ❌ DECLINED
+      </div>
+    `;
+  }
+
+  document.getElementById("orderStatus")
+    .innerHTML = html;
+}
+
+/* MENU */
+
+function openMenu() {
+
+  document
+    .getElementById("sideMenu")
+    .classList.add("active");
+
+  document
+    .getElementById("menuOverlay")
+    .style.display = "block";
+}
+
+function closeMenu() {
+
+  document
+    .getElementById("sideMenu")
+    .classList.remove("active");
+
+  document
+    .getElementById("menuOverlay")
+    .style.display = "none";
+}
+
+/* ADMIN */
+
+function showAdminLogin() {
+
+  closeMenu();
+
+  document
+    .getElementById("adminLogin")
+    .classList.remove("hidden");
+
+  window.scrollTo({
+    top: document.body.scrollHeight,
+    behavior: "smooth"
+  });
+}
+
+async function adminLogin() {
+
+  const key =
+    document.getElementById("adminKey").value;
+
+  const message =
+    document.getElementById("adminMessage");
+
+  if (!key) {
+
+    message.textContent =
+      "Enter the admin access key.";
+
+    return;
+  }
+
+  const response =
+    await fetch("/api/admin/orders", {
+      headers: {
+        "x-admin-key": key
+      }
+    });
+
+  if (!response.ok) {
+
+    message.textContent =
+      "❌ ACCESS DENIED";
+
+    return;
+  }
+
+  adminKey = key;
+
+  message.textContent =
+    "✅ ACCESS GRANTED";
+
+  document
+    .getElementById("adminLogin")
+    .classList.add("hidden");
+
+  document
+    .getElementById("adminDashboard")
+    .classList.remove("hidden");
+
+  loadOrders();
+}
+
+async function loadOrders() {
+
+  const container =
+    document.getElementById("adminOrders");
+
+  container.innerHTML =
+    "<p>Loading orders...</p>";
+
+  const response =
+    await fetch("/api/admin/orders", {
+
+      headers: {
+        "x-admin-key": adminKey
+      }
+
+    });
+
+  if (!response.ok) {
+
+    container.innerHTML =
+      "<p>Admin access expired.</p>";
+
+    return;
+  }
+
+  const orders =
+    await response.json();
+
+  if (orders.length === 0) {
+
+    container.innerHTML =
+      "<p>No orders yet.</p>";
+
+    return;
+  }
+
+  container.innerHTML = "";
+
+  orders.reverse().forEach(order => {
+
+    container.innerHTML += `
+
+      <div class="admin-order">
+
+        <h3>${order.product}</h3>
+
+        <p>
+          <strong>Order ID:</strong>
+          ${order.id}
+        </p>
+
+        <p>
+          <strong>Customer:</strong>
+          ${escapeHtml(order.customerName)}
+        </p>
+
+        <p>
+          <strong>Amount:</strong>
+          ${money(order.amount)}
+        </p>
+
+        <p>
+          <strong>Transaction ID:</strong>
+          ${escapeHtml(order.transactionId)}
+        </p>
+
+        <p>
+          <strong>Payment:</strong>
+          ${order.paymentStatus}
+        </p>
+
+        <p>
+          <strong>Injection:</strong>
+          ${order.injectionStatus || "NOT STARTED"}
+        </p>
+
+        <div class="admin-actions">
+
+          <button
+            class="approve"
+            onclick="paymentDecision(
+              '${order.id}',
+              'APPROVED'
+            )">
+            APPROVED
+          </button>
+
+          <button
+            class="decline"
+            onclick="paymentDecision(
+              '${order.id}',
+              'DECLINED'
+            )">
+            DECLINED
+          </button>
+
+          <button
+            class="injecting"
+            onclick="injectionDecision(
+              '${order.id}',
+              'INJECTING'
+            )">
+            INJECTING
+          </button>
+
+          <button
+            class="injected"
+            onclick="injectionDecision(
+              '${order.id}',
+              'INJECTED'
+            )">
+            INJECTED
+          </button>
+
+        </div>
+
+      </div>
+    `;
+  });
+}
+
+async function paymentDecision(id, status) {
+
+  const response =
+    await fetch(
+      `/api/admin/orders/${id}/payment`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-key": adminKey
+        },
+
+        body: JSON.stringify({ status })
+      }
+    );
+
+  if (response.ok) {
+    loadOrders();
+  }
+}
+
+async function injectionDecision(id, status) {
+
+  const response =
+    await fetch(
+      `/api/admin/orders/${id}/injection`,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type": "application/json",
+          "x-admin-key": adminKey
+        },
+
+        body: JSON.stringify({ status })
+      }
+    );
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    alert(data.error);
+    return;
+  }
+
+  loadOrders();
+}
+
+function closeAdmin() {
+
+  document
+    .getElementById("adminLogin")
+    .classList.add("hidden");
+
+  document
+    .getElementById("adminDashboard")
+    .classList.add("hidden");
+
+  adminKey = null;
+}
+
+function escapeHtml(value) {
+
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+loadProducts();
